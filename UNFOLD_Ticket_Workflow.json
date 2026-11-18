@@ -1,0 +1,411 @@
+{
+  "name": "UN/FOLD | Ticket email",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "26c67257-17af-412c-98a3-6cfbfcf6986a",
+      "name": "Every 15 seconds",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "15094627-a83b-4fb4-b135-a30a47396a09",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PASTE_RESPONSE_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Form Responses 1"
+        },
+        "options": {}
+      },
+      "id": "8baad99b-7643-45b5-b166-e1ceea05270e",
+      "name": "Read registration rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { randomBytes } = require('crypto');\nconst nameColumn = 'Full Name';\nconst emailColumn = 'Email Address';\nconst rows = $input.all();\nconst selected = rows.find(({json: row}) =>\n  String(row['Payment Status']).trim().toLowerCase() === 'paid' &&\n  (!String(row['Ticket Status'] ?? '').trim() ||\n    String(row['Ticket Status']).trim().toLowerCase() === 'pending') &&\n  String(row[nameColumn] ?? '').trim() &&\n  /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(row[emailColumn] ?? '').trim())\n);\nif (!selected) return [];\nconst row = selected.json;\nconst rowNumber = Number(row.row_number);\nif (!Number.isInteger(rowNumber) || rowNumber < 2) throw new Error('Missing response row number.');\nconst name = String(row[nameColumn]).trim();\nconst email = String(row[emailColumn]).trim();\nlet code = String(row['Ticket Code'] ?? '').trim();\nif (code && !/^UNF-[A-F0-9]{16}$/.test(code)) throw new Error('Invalid existing ticket code at row ' + rowNumber);\nif (!code) {\n  const existing = new Set(rows.map(({json}) => String(json['Ticket Code'] ?? '').trim()));\n  do { code = 'UNF-' + randomBytes(8).toString('hex').toUpperCase(); } while (existing.has(code));\n}\nconst escapeHtml = (value) => value.replace(/[&<>\"']/g, (char) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[char]));\nconst html = `<div style=\"background:#f3e9d8;padding:28px;font-family:Arial,sans-serif;color:#26221e\">\n<div style=\"max-width:560px;margin:auto;background:#191a18;color:#f3e9d8;padding:28px;border-top:5px solid #9f4433\">\n<p style=\"letter-spacing:2px;color:#e4a28f\">RAISE WORSHIP</p><h1 style=\"font-family:Georgia,serif\">UN/FOLD</h1>\n<p>Hi ${escapeHtml(name)}, your regular admission ticket is attached.</p>\n<p><strong>November 21, 2026 \u00b7 6:00 PM</strong><br>AULGA Sports Gym<br>Lawa-an II, Talisay City, Cebu</p>\n<p>Ticket code<br><strong style=\"font-family:monospace\">${code}</strong></p>\n<p>Show the attached QR ticket or a screenshot at the entrance.</p></div></div>`;\nreturn [{json: {rowNumber, name, email, code, html}}];"
+      },
+      "id": "1198e449-9fef-4814-b47d-45ba97ca89de",
+      "name": "Prepare ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PASTE_RESPONSE_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Form Responses 1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('Prepare ticket').first().json.rowNumber }}",
+            "Ticket Code": "={{ $('Prepare ticket').first().json.code }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "display": true
+            },
+            {
+              "id": "Ticket Code",
+              "displayName": "Ticket Code",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "display": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6ea7b747-7775-4b3e-b720-3133f33924b8",
+      "name": "Save ticket code",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        960,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://unfold-ticket-renderer:8080/ticket",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({name: $('Prepare ticket').first().json.name, code: $('Prepare ticket').first().json.code}) }}",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "ticket"
+            }
+          }
+        }
+      },
+      "id": "9a8d537f-359d-48f7-8886-4c3948ca28f6",
+      "name": "Render PNG ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PASTE_RESPONSE_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Form Responses 1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('Prepare ticket').first().json.rowNumber }}",
+            "Ticket Status": "Sending"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "display": true
+            },
+            {
+              "id": "Ticket Status",
+              "displayName": "Ticket Status",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "display": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "121fd329-dcf3-4d6d-b6b5-411e2ffa0825",
+      "name": "Mark sending",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $('Render PNG ticket').first().binary.ticket;\nconst details = $('Prepare ticket').first().json;\nreturn [{json: details, binary: {ticket: {...output, fileName: details.code + '.png'}}}];"
+      },
+      "id": "e351d3c1-8aba-4567-80da-2cc077fb082e",
+      "name": "Attach rendered ticket",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ 'Your UN/FOLD ticket | ' + $json.code }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "ticket"
+              }
+            ]
+          }
+        }
+      },
+      "id": "8505bf6d-8ccf-4f2a-a828-a19f69311a49",
+      "name": "Send ticket email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1920,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PASTE_RESPONSE_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Form Responses 1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $('Prepare ticket').first().json.rowNumber }}",
+            "Ticket Status": "Sent",
+            "Ticket Sent At": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "display": true
+            },
+            {
+              "id": "Ticket Status",
+              "displayName": "Ticket Status",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "display": true
+            },
+            {
+              "id": "Ticket Sent At",
+              "displayName": "Ticket Sent At",
+              "type": "string",
+              "canBeUsedToMatch": false,
+              "display": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "22e7629b-6280-4f80-94a7-40cd0d65e4f7",
+      "name": "Mark sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        2160,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Read registration rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 seconds": {
+      "main": [
+        [
+          {
+            "node": "Read registration rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read registration rows": {
+      "main": [
+        [
+          {
+            "node": "Prepare ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare ticket": {
+      "main": [
+        [
+          {
+            "node": "Save ticket code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save ticket code": {
+      "main": [
+        [
+          {
+            "node": "Render PNG ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render PNG ticket": {
+      "main": [
+        [
+          {
+            "node": "Mark sending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark sending": {
+      "main": [
+        [
+          {
+            "node": "Attach rendered ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach rendered ticket": {
+      "main": [
+        [
+          {
+            "node": "Send ticket email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send ticket email": {
+      "main": [
+        [
+          {
+            "node": "Mark sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Manila",
+    "executionTimeout": 55
+  }
+}
